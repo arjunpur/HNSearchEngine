@@ -57,8 +57,8 @@ class HNCrawler {
 
   /**
     * Writes a batch of futures to CSV
-    * @param items
-    * @param partNum
+    * @param items items to write
+    * @param partNum batch number of writes to distinguish file names
     */
   def writeItems(items: IndexedSeq[Future[HNItem]], partNum: Int): Unit = {
     val csvToWrite = items.map(_.map(_.toCSV(DELIMITER)))
