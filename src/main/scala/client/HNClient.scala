@@ -35,13 +35,13 @@ case object MaxItemIdRequest extends Request {
 }
 
 /* JSON Protocol */
-case class HNPost(id: Long, deleted: Option[String], `type`: Option[String], by: Option[String],
+case class HNItem(id: Long, deleted: Option[String], `type`: Option[String], by: Option[String],
                   time: Option[Long], text: Option[String], dead: Option[Boolean], parent: Option[Long],
                   kids: Option[List[Long]], url: Option[String], score: Option[Int], title: Option[String],
                   parts: Option[List[Long]], descendants: Option[Int])
 
 object HNJsonProtocol extends DefaultJsonProtocol {
-  implicit val post = jsonFormat14(HNPost.apply)
+  implicit val post = jsonFormat14(HNItem.apply)
 }
 
 object HNClient {
@@ -55,7 +55,7 @@ object HNClient {
   import HNJsonProtocol._
   import SprayJsonSupport._
   /* Pipeline to deal with requests to HNPost */
-  val postPipeline: HttpRequest => Future[HNPost]  = sendReceive ~> unmarshal[HNPost]
+  val postPipeline: HttpRequest => Future[HNItem]  = sendReceive ~> unmarshal[HNItem]
   val maxIdPipeline: HttpRequest ⇒ Future[String] = sendReceive ~> unmarshal[String]
 
 }
@@ -64,7 +64,7 @@ class HNClient {
   import HNClient._
   import system.dispatcher
 
-  def item(id: Long): Future[HNPost] = {
+  def item(id: Long): Future[HNItem] = {
     val url = ItemRequest(id).url
     execute(url, postPipeline)
   }
@@ -82,7 +82,6 @@ class HNClient {
         log.info(s"Request: $req success")
       case Failure(res) =>
         log.error(s"Request: $req failed due to: $res")
-        IO(Http).ask(Http.CloseAll)(1.second).await
     }
     future
   }

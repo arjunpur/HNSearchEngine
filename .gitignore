@@ -1,0 +1,8 @@
+target
+.*.swp
+.DS_Store
+*.cache
+*.class
+*.classpath
+*.project
+*.settings
