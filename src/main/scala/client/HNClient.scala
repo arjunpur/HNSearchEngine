@@ -4,19 +4,12 @@ import java.net.URL
 
 import akka.actor.ActorSystem
 import akka.event.Logging
-import akka.io.IO
-import akka.pattern.ask
-import spray.can.Http
-import spray.http.{HttpResponse, HttpRequest}
+import spray.http.HttpRequest
 import spray.httpx.SprayJsonSupport
-import scala.concurrent.Future
-import scala.concurrent.duration._
-import spray.json.{JsonFormat, DefaultJsonProtocol}
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
+import spray.json.DefaultJsonProtocol
 import spray.client.pipelining._
-import spray.util._
-import scala.util.{Failure, Success}
-
-
 /**
   * Created by arjunpuri on 11/27/16.
   */
@@ -35,10 +28,11 @@ case object MaxItemIdRequest extends Request {
 }
 
 /* JSON Protocol */
-case class HNItem(id: Long, deleted: Option[String], `type`: Option[String], by: Option[String],
-                  time: Option[Long], text: Option[String], dead: Option[Boolean], parent: Option[Long],
-                  kids: Option[List[Long]], url: Option[String], score: Option[Int], title: Option[String],
-                  parts: Option[List[Long]], descendants: Option[Int])
+case class HNItem(id: Long, deleted: Option[String] = None, `type`: Option[String] = None, by: Option[String] = None,
+                  time: Option[Long] = None, text: Option[String] = None, dead: Option[Boolean] = None, parent: Option[Long] = None,
+                  kids: Option[List[Long]] = None, url: Option[String] = None, score: Option[Int] = None, title: Option[String] = None,
+                  parts: Option[List[Long]] = None, descendants: Option[Int] = None)
+
 
 object HNJsonProtocol extends DefaultJsonProtocol {
   implicit val post = jsonFormat14(HNItem.apply)
@@ -62,7 +56,6 @@ object HNClient {
 
 class HNClient {
   import HNClient._
-  import system.dispatcher
 
   def item(id: Long): Future[HNItem] = {
     val url = ItemRequest(id).url
@@ -74,16 +67,10 @@ class HNClient {
     execute(url, maxIdPipeline)
   }
 
-  def execute[T](req: String, pipeline: HttpRequest => Future[T]) = {
-    log.info(s"Executing: $req")
-    val future = pipeline(Get(req))
-    future.onComplete {
-      case Success(res) =>
-        log.info(s"Request: $req success")
-      case Failure(res) =>
-        log.error(s"Request: $req failed due to: $res")
-    }
-    future
+  def execute[T](req: String, pipeline: HttpRequest => Future[T]): Future[T] = pipeline(Get(req))
+
+  def shutdown(): Unit = {
+    Await.result(system.terminate(), Duration.Inf)
   }
 
 
