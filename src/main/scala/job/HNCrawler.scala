@@ -1,16 +1,16 @@
 package job
 
-import java.io.File
-import java.nio.ByteBuffer
-import java.nio.channels.AsynchronousFileChannel
-import java.nio.file.{StandardOpenOption, Paths}
+import java.io.{FileWriter, BufferedWriter, File}
 
-import client.{HNItem, HNClient}
+import org.scalactic.ErrorMessage
+import spray.json._
+import client.{HNItem, HNClient, HNJsonProtocol}
 
 import scala.concurrent.{Future, Await}
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import org.rogach.scallop._
+
 
 
 /**
@@ -19,27 +19,40 @@ import org.rogach.scallop._
 
 object HNCrawler {
 
-//  def main(args: Array[String]): Unit = {
-//    new HNCrawler().runJob()
-//  }
-
-  implicit class CSVWrapper(val prod: Product) extends AnyVal {
-    def toCSV(delim: String) = prod.productIterator.map{
-      case Some(value) => value
-      case None => ""
-      case rest => rest
-    }.mkString(delim)
+  def main(args: Array[String]): Unit = {
+    val arguments = new HNCrawlerArgs(args)
+    val crawler = new HNCrawler(
+      arguments.outputDir.apply(),
+      arguments.maxId.toOption,
+      new HNClient(),
+      arguments.batchSize.apply()
+    )
+    crawler.init()
+    crawler.runJob()
   }
 
+}
 
+/**
+  * Arguments for the crawler
+  */
+class HNCrawlerArgs(args: Seq[String]) extends ScallopConf(args) {
+  val outputDir = opt[File](default = Some(new File("/Users/arjunpuri/tmp/crawler")))
+  val maxId = opt[Long](default = Some(1000))
+  val batchSize = opt[Int](default = Some(10000))
+  verify()
 }
 
 class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, batchSize: Int = 10000) {
 
-  import HNCrawler._
+  import HNJsonProtocol._
 
   private val DELIMITER = "|"
-  private val TIMEOUT = 10.second
+  private val TIMEOUT = 100.second
+
+  def init(): Unit = {
+    if (!outputDir.exists()) outputDir.mkdirs()
+  }
 
   def runJob(): Unit = {
     val maxItemId = Await.result(client.maxItemId(), TIMEOUT).toLong
@@ -65,7 +78,7 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, b
     * @param partNum: Essentially a batch number
     */
   def crawlItems(idHi: Long, idLo: Long, partNum: Int): Unit = {
-    val items = (idHi to idLo by -1).map(client.item)
+    val items = (idHi to idLo by -1).map(client.item).toSeq
     writeItems(items, partNum)
   }
 
@@ -76,16 +89,16 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, b
     * @param partNum batch number of writes to distinguish file names
     */
   def writeItems(items: Seq[Future[HNItem]], partNum: Int): Unit = {
-    val csvToWrite = items.map(_.map(_.toCSV(DELIMITER)))
-    val seqFuture = Future.sequence(csvToWrite).map(_.mkString("\n"))
+    val errors = Seq.newBuilder[ErrorMessage]
+    val jsonToWrite = items.map(_.map(item => Some(item.toJson.toString()))
+      .recover { case e => errors += e.getMessage; None })
+    val seqFuture = Future.sequence(jsonToWrite).map(_.flatMap(_.mkString("\n")))
     val fileToWrite = new File(outputDir, s"/part-$partNum.txt")
     fileToWrite.getParentFile.mkdirs()
     fileToWrite.createNewFile()
-    val fileChannel = AsynchronousFileChannel.open(Paths.get(fileToWrite.getAbsolutePath), StandardOpenOption.WRITE)
-    val byteFuture = seqFuture.map(itemStr => ByteBuffer.wrap(itemStr.getBytes))
-    byteFuture.foreach(bytes => fileChannel.write(bytes, 0))
-    Await.result(byteFuture, Duration.Inf)
+    val writer = new BufferedWriter(new FileWriter(fileToWrite))
+    Await.result(seqFuture.map(json => writer.write(json.toArray)), Duration.Inf)
+    println("done")
   }
-
 
 }
