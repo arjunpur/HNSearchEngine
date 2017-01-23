@@ -92,12 +92,15 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, b
     val errors = Seq.newBuilder[ErrorMessage]
     val jsonToWrite = items.map(_.map(item => Some(item.toJson.toString()))
       .recover { case e => errors += e.getMessage; None })
-    val seqFuture = Future.sequence(jsonToWrite).map(_.flatMap(_.mkString("\n")))
+    val seqFuture = Future.sequence(jsonToWrite).map(_.flatten)
     val fileToWrite = new File(outputDir, s"/part-$partNum.txt")
     fileToWrite.getParentFile.mkdirs()
     fileToWrite.createNewFile()
     val writer = new BufferedWriter(new FileWriter(fileToWrite))
-    Await.result(seqFuture.map(json => writer.write(json.toArray)), Duration.Inf)
+    Await.result(seqFuture.map(_.foreach(json => {
+      writer.write(json)
+      writer.newLine()
+    })), Duration.Inf)
     println("done")
   }
 
