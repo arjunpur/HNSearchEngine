@@ -4,12 +4,15 @@ import java.net.URL
 
 import akka.actor.ActorSystem
 import akka.event.Logging
-import spray.http.HttpRequest
+import spray.http.{HttpResponse, HttpRequest}
 import spray.httpx.SprayJsonSupport
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
 import spray.json.DefaultJsonProtocol
 import spray.client.pipelining._
+
+import scala.util.Try
+
 /**
   * Created by arjunpuri on 11/27/16.
   */
@@ -28,7 +31,7 @@ case object MaxItemIdRequest extends Request {
 }
 
 /* JSON Protocol */
-case class HNItem(id: Long, deleted: Option[String] = None, `type`: Option[String] = None, by: Option[String] = None,
+case class HNItem(id: Option[Long] = None, deleted: Option[String] = None, `type`: Option[String] = None, by: Option[String] = None,
                   time: Option[Long] = None, text: Option[String] = None, dead: Option[Boolean] = None, parent: Option[Long] = None,
                   kids: Option[List[Long]] = None, url: Option[String] = None, score: Option[Int] = None, title: Option[String] = None,
                   parts: Option[List[Long]] = None, descendants: Option[Int] = None)
@@ -42,8 +45,8 @@ object HNClient {
 
   /* Async client needs a system */
   implicit val system = ActorSystem("HNClient")
+  implicit val context = system.dispatcher
   /* Get the execution context */
-  import system.dispatcher
   val log = Logging(system, getClass)
 
   import HNJsonProtocol._
@@ -72,7 +75,6 @@ class HNClient {
   def shutdown(): Unit = {
     Await.result(system.terminate(), Duration.Inf)
   }
-
 
 }
 
