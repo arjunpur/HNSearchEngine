@@ -13,7 +13,8 @@ libraryDependencies ++= Seq(
   "com.typesafe.akka" %% "akka-actor" % "2.4.14",
   "io.spray" % "spray-client_2.11" % "1.3.3",
   "io.spray" % "spray-json_2.11" % "1.3.2",
-  "com.github.melrief" %% "purecsv" % "0.0.6"
+  "com.github.melrief" %% "purecsv" % "0.0.6",
+  "org.rogach" %% "scallop" % "2.0.6"
 )
 
 scalacOptions := Seq("-feature", "-language:implicitConversions")
