@@ -25,6 +25,7 @@ class HNCrawlerArgs(args: Seq[String]) extends ScallopConf(args) {
   val outputDir = opt[File](default = Some(new File("/Users/arjunpuri/tmp/crawler")))
   val maxId = opt[Long](default = Some(1000))
   val batchSize = opt[Int](default = Some(10000))
+  val sinkName = opt[String](default = Some("job.FileSink"))
   verify()
 }
 
@@ -38,7 +39,8 @@ object HNCrawler {
       arguments.outputDir.apply(),
       arguments.maxId.toOption,
       new HNClient(),
-      arguments.batchSize.apply()
+      arguments.batchSize.apply(),
+      CrawlSink(arguments.sinkName.apply())
     )
     crawler.init()
     crawler.runJob()
@@ -46,14 +48,9 @@ object HNCrawler {
 
 }
 
-trait CrawlSink {
-
-  def write(items: Future[Seq[String]]): Unit {
-
-  }
-}
-
-class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, batchSize: Int = 10000) extends StrictLogging {
+class HNCrawler(outputDir: File, maxId: Option[Long] = None,
+                client: HNClient, batchSize: Int = 10000,
+                sink: CrawlSink) extends StrictLogging {
 
   import HNJsonProtocol._
 
@@ -70,25 +67,13 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, b
     /* Batch the ids and asynchronously crawl them */
     while (i > 0) {
       val lowerId = Math.max(0, i - batchSize)
-      crawlItems(i, lowerId, partNum)
+      val items = serializeItems((i to lowerId by -1).map(client.item).toSeq) // api call foreach id, then serialize
+      sink.writeItems(items, partNum, outputDir)
       i = lowerId
       partNum += 1
     }
     logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime}")
     client.shutdown()
-  }
-
-  /**
-    * For a range of item ids, fires off async API requests to
-    * retrieve item JSON.
-    * @param idHi    : Upper bound of ids to crawl
-    * @param idLo    : Lower bound of ids to crawl
-    * @param partNum : Essentially a batch number
-    */
-  def crawlItems(idHi: Long, idLo: Long, partNum: Int): Unit = {
-    val items = (idHi to idLo by -1).map(client.item).toSeq
-    val serializedItems = serializeItems(items)
-    writeItems(serializedItems, partNum)
   }
 
   /** Serializes a sequence of [[HNItem]] **/
@@ -99,22 +84,6 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None, client: HNClient, b
     logger.error(s"Following serialization errors: ${errors.result().size}")
     logger.info(s"Writing ${jsonToWrite.size} items")
     Future.sequence(jsonToWrite).map(_.flatten)
-  }
-
-  /**
-    * Writes a batch of futures to CSV
-    * @param items   items to write
-    * @param partNum batch number of writes to distinguish file names
-    */
-  def writeItems(items: Future[Seq[String]], partNum: Int): Unit = {
-    val fileToWrite = new File(outputDir, s"/part-$partNum.txt")
-    fileToWrite.getParentFile.mkdirs()
-    fileToWrite.createNewFile()
-    val writer = new BufferedWriter(new FileWriter(fileToWrite))
-    Await.result(items.map(_.foreach(json => {
-      writer.write(json)
-      writer.newLine()
-    })), Duration.Inf)
   }
 
 }
