@@ -22,44 +22,43 @@ import org.rogach.scallop._
   * Arguments for the crawler
   */
 class HNCrawlerArgs(args: Seq[String]) extends ScallopConf(args) {
-  val outputDir = opt[File](default = Some(new File("/Users/arjunpuri/tmp/crawler")))
   val maxId = opt[Long](default = Some(1000))
   val batchSize = opt[Int](default = Some(10000))
-  val sinkName = opt[String](default = Some("job.FileSink"))
+  val outputDir = opt[File](default = Some(CrawlSink.DEFAULT_OUTPUT_DIR))
+  val bucketName = opt[String](default = Some(CrawlSink.DEFAULT_S3_BUCKET_NAME))
   verify()
 }
 
 object HNCrawler {
 
-  private val TIMEOUT = 100.second
-
   def main(args: Array[String]): Unit = {
     val arguments = new HNCrawlerArgs(args)
-    val crawler = new HNCrawler(
-      arguments.outputDir.apply(),
-      arguments.maxId.toOption,
-      new HNClient(),
-      arguments.batchSize.apply(),
-      CrawlSink(arguments.sinkName.apply())
-    )
+    val client = new HNClient()
+    val sink = new CrawlSink(arguments.outputDir.apply(), arguments.bucketName.apply())
+    val crawler = new HNCrawler(arguments.maxId.toOption, client, arguments.batchSize.apply(), sink)
     crawler.init()
     crawler.runJob()
   }
 
 }
 
-class HNCrawler(outputDir: File, maxId: Option[Long] = None,
-                client: HNClient, batchSize: Int = 10000,
-                sink: CrawlSink) extends StrictLogging {
+/**
+  * @param maxId maximum id to crawl
+  * @param client client to communicate with the HN api
+  * @param batchSize how many items to write in a single batch
+  * @param sink where to write the crawled data
+  */
+class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 10000, sink: CrawlSink) extends StrictLogging {
 
   import HNJsonProtocol._
 
   def init(): Unit = {
-    if (!outputDir.exists()) outputDir.mkdirs()
+    sink.init()
   }
 
+  /** Runs the crawl **/
   def runJob(): Unit = {
-    val maxItemId = Await.result(client.maxItemId(), HNCrawler.TIMEOUT).toLong // Find max available item id
+    val maxItemId = Await.result(client.maxItemId(), Duration.Inf).toLong // Find max available item id
     var i = maxId.getOrElse(maxItemId)
     var partNum = 0
     logger.info(s"Found max Id as: $i")
@@ -68,7 +67,7 @@ class HNCrawler(outputDir: File, maxId: Option[Long] = None,
     while (i > 0) {
       val lowerId = Math.max(0, i - batchSize)
       val items = serializeItems((i to lowerId by -1).map(client.item).toSeq) // api call foreach id, then serialize
-      sink.writeItems(items, partNum, outputDir)
+      sink.writeItems(items, partNum)
       i = lowerId
       partNum += 1
     }
