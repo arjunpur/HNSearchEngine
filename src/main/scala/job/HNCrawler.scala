@@ -1,6 +1,6 @@
 package job
 
-import java.io.{FileWriter, BufferedWriter, File}
+import java.io.File
 
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic.ErrorMessage
