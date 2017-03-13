@@ -1,7 +1,5 @@
 package crawler
 
-import java.io.File
-
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic.ErrorMessage
 import spray.json._
@@ -21,21 +19,18 @@ import org.rogach.scallop._
 /**
   * Arguments for the crawler
   */
-class HNCrawlerArgs(args: Seq[String]) extends ScallopConf(args) {
+trait CrawlerArgs extends ScallopConf {
   val maxId = opt[Long](default = Some(1000))
   val batchSize = opt[Int](default = Some(10000))
-  val outputDir = opt[File](default = Some(S3CrawlSink.DEFAULT_OUTPUT_DIR))
-  val bucketName = opt[String](default = Some(S3CrawlSink.DEFAULT_S3_BUCKET_NAME))
-  val sinkType = opt[String](default = )
-  verify()
 }
 
 object HNCrawler {
 
   def main(args: Array[String]): Unit = {
-    val arguments = new HNCrawlerArgs(args)
+    val arguments = new ScallopConf(args) with CrawlerArgs with CrawlSinkArgs {()}
+    arguments.verify()
     val client = new HNClient()
-    val sink = new S3CrawlSink(arguments.outputDir.apply(), arguments.bucketName.apply())
+    val sink = CrawlSink(arguments)
     val crawler = new HNCrawler(arguments.maxId.toOption, client, arguments.batchSize.apply(), sink)
     crawler.init()
     crawler.runJob()
@@ -49,7 +44,7 @@ object HNCrawler {
   * @param batchSize how many items to write in a single batch
   * @param sink where to write the crawled data
   */
-class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 10000, sink: S3CrawlSink) extends StrictLogging {
+class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 10000, sink: CrawlSink) extends StrictLogging {
 
   import HNJsonProtocol._
 
