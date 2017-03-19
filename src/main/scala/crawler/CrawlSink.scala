@@ -5,22 +5,14 @@ import java.io.{FileWriter, BufferedWriter, File}
 import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import com.typesafe.scalalogging.StrictLogging
-import org.rogach.scallop.ScallopConf
 
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContext, Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
 /**
   * Created by arjunpuri on 1/29/17.
   */
-
-trait CrawlSinkArgs extends ScallopConf {
-  /* For local, outputs part files here. For S3, uses it as temp store */
-  val outputDir = opt[File](default = Some(CrawlSink.DEFAULT_OUTPUT_DIR))
-  val bucketName = opt[String](default = Some(S3CrawlSink.DEFAULT_S3_BUCKET_NAME))
-  val sinkType = opt[String](default = Some(CrawlSink.DEFAULT_SINK))
-}
 
 object CrawlSink {
 
@@ -31,10 +23,14 @@ object CrawlSink {
   val DEFAULT_OUTPUT_DIR: File = new File(s"${System.getProperty("user.home")}/tmp/crawler")
 
   /** Using a type reference to the crawler sink, generate the appropriate sink */
-  def apply(args: CrawlSinkArgs): CrawlSink = {
-    val crawlerClass = Class.forName(args.sinkType.apply())
-    val constructor = crawlerClass.getConstructor(classOf[CrawlSinkArgs])
-    constructor.newInstance(args).asInstanceOf[CrawlSink]
+  def apply(outputDir: File, bucketName: String, sinkType: String): CrawlSink = {
+    val crawlSink = sinkType match {
+      case "crawler.S3CrawlSink" => S3CrawlSink(outputDir, bucketName)
+      case "crawler.LocalCrawlSink" => LocalCrawlSink(outputDir)
+      case _ => throw new IllegalArgumentException(s"$sinkType does not exist")
+    }
+    crawlSink.init()
+    crawlSink
   }
 
 }
@@ -42,32 +38,47 @@ object CrawlSink {
 /**
   * Trait which any crawler sink will implement to write out items
   */
-trait CrawlSink {
+sealed trait CrawlSink extends StrictLogging {
+  def outputDir: File
+  /** Any init code **/
   def init(): Unit = {}
-  def writeItems(items: Future[Seq[String]], partNum: Int)(implicit executionContext: ExecutionContext): Unit
+
+  /** Implementors define this function **/
+  def writeItems(items: Seq[String], partNum: Int, crawlState: CrawlState)(implicit executionContext: ExecutionContext): Unit
+
+  /** Gets the name of a part file given its number **/
+  protected def getPartFileName(partNum: Int): String = f"/part-${partNum}%05d"
+
+  /** Writes items to intermediary file
+ *
+    * @return Returns the timestamp directory to which the intermediary files were written
+    */
+  protected def writeToIntermediary(items: Seq[String], partNum: Int, crawlState: CrawlState, outputDir: File)(implicit executionContext: ExecutionContext): File = {
+    val tsDir = new File(outputDir, crawlState.timestamp.toString)
+    tsDir.mkdirs()
+    /* Create file to write and write to it */
+    val fileToWrite = new File(tsDir, getPartFileName(partNum))
+    val writer = new BufferedWriter(new FileWriter(fileToWrite))
+    items.foreach(json => {
+      writer.write(json)
+      writer.newLine()
+    })
+    writer.close()
+    tsDir
+  }
+
 }
 
+
 /** Sink to write to local disk **/
-class LocalCrawlSink(args: CrawlSinkArgs) extends CrawlSink with StrictLogging {
+case class LocalCrawlSink(outputDir: File) extends CrawlSink with StrictLogging {
 
   override def init(): Unit = {
-    val outputDir = args.outputDir.apply()
     if (!outputDir.exists()) outputDir.mkdirs()
   }
 
-  override def writeItems(items: Future[Seq[String]], partNum: Int)(implicit executionContext: ExecutionContext): Unit = {
-    val outputDir = args.outputDir.apply()
-    val timestamp = s"${System.currentTimeMillis()/1000}"
-    val tsDir = new File(outputDir, timestamp)
-    tsDir.mkdirs()
-    /* Create file to write and write to it */
-    val fileToWrite = new File(tsDir, s"/part-$partNum")
-    val writer = new BufferedWriter(new FileWriter(fileToWrite))
-    Await.result(items.map(_.foreach(json => {
-      writer.write(json)
-      writer.newLine()
-    })), Duration.Inf)
-    writer.close()
+  override def writeItems(items: Seq[String], partNum: Int, crawlState: CrawlState)(implicit executionContext: ExecutionContext): Unit = {
+    writeToIntermediary(items, partNum, crawlState, outputDir)
   }
 
 }
@@ -81,10 +92,9 @@ object S3CrawlSink {
 
 
 /** S3 sink to write out items to S3 */
-class S3CrawlSink(args: CrawlSinkArgs) extends CrawlSink with StrictLogging {
+case class S3CrawlSink(outputDir: File, bucketName: String) extends CrawlSink with StrictLogging {
 
   override def init(): Unit = {
-    val outputDir = args.outputDir.apply()
     if (!outputDir.exists()) outputDir.mkdirs()
   }
 
@@ -93,28 +103,18 @@ class S3CrawlSink(args: CrawlSinkArgs) extends CrawlSink with StrictLogging {
     * @param items   items to write
     * @param partNum batch number of writes to distinguish file names
     */
-  override def writeItems(items: Future[Seq[String]], partNum: Int)(implicit executionContext: ExecutionContext): Unit = {
-    val outputDir = args.outputDir.apply()
-    val timestamp = s"${System.currentTimeMillis()/1000}"
-    val tsDir = new File(outputDir, timestamp)
-    tsDir.mkdirs()
-    /* Create file to write and write to it */
-    val fileToWrite = new File(tsDir, f"/part-${partNum}%05d")
-    val writer = new BufferedWriter(new FileWriter(fileToWrite))
-    Await.result(items.map(_.foreach(json => {
-      writer.write(json)
-      writer.newLine()
-    })), Duration.Inf)
-    writer.close()
+  override def writeItems(items: Seq[String], partNum: Int, crawlState: CrawlState)(implicit executionContext: ExecutionContext): Unit = {
     /* Upload file to S3 and delete */
-    retry(S3CrawlSink.NUM_RETRIES)(uploadToS3(s"$timestamp/${fileToWrite.getName}", fileToWrite))
+    val tsDir = writeToIntermediary(items, partNum, crawlState, outputDir)
+    val fileToWrite = new File(tsDir, getPartFileName(partNum))
+    retry(S3CrawlSink.NUM_RETRIES)(uploadToS3(s"${crawlState.timestamp.toString}/${fileToWrite.getName}", fileToWrite))
     fileToWrite.delete()
   }
 
   /** Write file to S3 **/
   private def uploadToS3(key: String, file: File) = {
     val s3Client = AmazonS3ClientBuilder.standard().withRegion(Regions.US_WEST_2).build()
-    s3Client.putObject(args.bucketName.apply(), key, file)
+    s3Client.putObject(bucketName, key, file)
   }
 
   /** Retries running a function some number of times **/

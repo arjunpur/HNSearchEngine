@@ -1,5 +1,7 @@
 package crawler
 
+import java.io.File
+
 import com.typesafe.scalalogging.StrictLogging
 import org.scalactic.ErrorMessage
 import spray.json._
@@ -10,6 +12,8 @@ import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
 import org.rogach.scallop._
 
+import scala.util.{Try, Failure, Success}
+
 
 /**
   * Created by arjunpuri on 11/29/16.
@@ -19,24 +23,30 @@ import org.rogach.scallop._
 /**
   * Arguments for the crawler
   */
-trait CrawlerArgs extends ScallopConf {
-  val maxId = opt[Long](default = Some(1000))
-  val batchSize = opt[Int](default = Some(10000))
+class HNCrawlerArgs(args: Seq[String]) extends ScallopConf(args) {
+  val maxId = opt[Long](name = "maxId")
+  val batchSize = opt[Int](name = "batchSize", default = Some(10000))
+  /* For local, outputs part files here. For S3, uses it as temp store */
+  val outputDir = opt[File](name = "outputDir", default = Some(CrawlSink.DEFAULT_OUTPUT_DIR))
+  val bucketName = opt[String](name = "bucketName", default = Some(S3CrawlSink.DEFAULT_S3_BUCKET_NAME))
+  val sinkType = opt[String](name = "sinkType", default = Some(CrawlSink.DEFAULT_SINK))
+  verify()
 }
 
 object HNCrawler {
 
   def main(args: Array[String]): Unit = {
-    val arguments = new ScallopConf(args) with CrawlerArgs with CrawlSinkArgs {()}
-    arguments.verify()
+    val arguments = new HNCrawlerArgs(args)
     val client = new HNClient()
-    val sink = CrawlSink(arguments)
+    val sink = CrawlSink(arguments.outputDir.apply(), arguments.bucketName.apply(), arguments.sinkType.apply())
     val crawler = new HNCrawler(arguments.maxId.toOption, client, arguments.batchSize.apply(), sink)
     crawler.init()
     crawler.runJob()
   }
 
 }
+
+case class CrawlState(timestamp: Long)
 
 /**
   * @param maxId maximum id to crawl
@@ -54,6 +64,7 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
 
   /** Runs the crawl **/
   def runJob(): Unit = {
+    val crawlState = CrawlState(System.currentTimeMillis())
     val maxItemId = Await.result(client.maxItemId(), Duration.Inf).toLong // Find max available item id
     var i = maxId.getOrElse(maxItemId)
     var partNum = 0
@@ -62,23 +73,17 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
     /* Batch the ids and asynchronously crawl them */
     while (i > 0) {
       val lowerId = Math.max(0, i - batchSize)
-      val items = serializeItems((i to lowerId by -1).map(client.item).toSeq) // api call foreach id, then serialize
-      sink.writeItems(items, partNum)
+      val idsToProcess = i to lowerId by -1
+      logger.info(s"Processing Ids: ${idsToProcess.min} to ${idsToProcess.max}")
+      val items = Await.result(Future.sequence(idsToProcess.map(client.item).toSeq), Duration.Inf)
+      logger.info(s"Got back ${items.size} items")
+      val serializedItems = items.map(_.toJson.toString) // api call foreach id, then serialize
+      sink.writeItems(serializedItems, partNum, crawlState)
       i = lowerId
       partNum += 1
     }
     logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime}")
     client.shutdown()
-  }
-
-  /** Serializes a sequence of [[HNItem]] **/
-  private def serializeItems(items: Seq[Future[HNItem]]): Future[Seq[String]] = {
-    val errors = Seq.newBuilder[ErrorMessage]
-    val jsonToWrite = items.map(_.map(item => Some(item.toJson.toString()))
-      .recover { case e => errors += e.getMessage; None })
-    logger.error(s"Following serialization errors: ${errors.result().size}")
-    logger.info(s"Writing ${jsonToWrite.size} items")
-    Future.sequence(jsonToWrite).map(_.flatten)
   }
 
 }
