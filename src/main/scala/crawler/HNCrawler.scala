@@ -3,6 +3,7 @@ package crawler
 import java.io.File
 
 import com.typesafe.scalalogging.StrictLogging
+import org.apache.commons.lang.time.DateUtils
 import org.scalactic.ErrorMessage
 import spray.json._
 import client.{HNItem, HNClient, HNJsonProtocol}
@@ -74,16 +75,34 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
     while (i > 0) {
       val lowerId = Math.max(0, i - batchSize)
       val idsToProcess = i to lowerId by -1
+
       logger.info(s"Processing Ids: ${idsToProcess.min} to ${idsToProcess.max}")
-      val items = Await.result(Future.sequence(idsToProcess.map(client.item).toSeq), Duration.Inf)
-      logger.info(s"Got back ${items.size} items")
+      val (items, failures) = crawlItems(idsToProcess)
+      logger.info(s"Got back ${items.size} success items")
+      logger.info(s"Got back ${failures.size} failed items: $failures")
+
       val serializedItems = items.map(_.toJson.toString) // api call foreach id, then serialize
       sink.writeItems(serializedItems, partNum, crawlState)
       i = lowerId
       partNum += 1
     }
-    logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime}")
+    logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime} ms")
     client.shutdown()
+  }
+
+  def crawlItems(idsToCrawl: Seq[Long]): (Seq[HNItem], Seq[String]) = {
+    val crawledFutures = idsToCrawl.map(client.item)
+    val triedItems = crawledFutures.map(futureToFutureTry)
+    val results = Await.result(Future.sequence(triedItems), Duration.Inf).zip(idsToCrawl)
+    val successItems = results.map(_._1).flatMap(_.toOption)
+    val failedItems = results.collect {
+      case (Failure(e), idx) => s"Item #$idx failed with: ${e.getLocalizedMessage}"
+    }
+    (successItems, failedItems)
+  }
+
+  private def futureToFutureTry[T](f: Future[T]): Future[Try[T]] = {
+    f.map(Success(_)) .recover({case x => Failure(x)})
   }
 
 }
