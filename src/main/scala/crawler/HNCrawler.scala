@@ -86,10 +86,12 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
       i = lowerId
       partNum += 1
     }
+    sink.complete(crawlState)
     logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime} ms")
     client.shutdown()
   }
 
+  /** Crawls a series of ids an syncrhonously writes to sink */
   def crawlItems(idsToCrawl: Seq[Long]): (Seq[HNItem], Seq[String]) = {
     val crawledFutures = idsToCrawl.map(client.item)
     val triedItems = crawledFutures.map(futureToFutureTry)
@@ -101,6 +103,7 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
     (successItems, failedItems)
   }
 
+  /** Converts a future to a try future */
   private def futureToFutureTry[T](f: Future[T]): Future[Try[T]] = {
     f.map(Success(_)) .recover({case x => Failure(x)})
   }

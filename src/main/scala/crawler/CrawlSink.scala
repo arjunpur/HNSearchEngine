@@ -49,8 +49,11 @@ sealed trait CrawlSink extends StrictLogging {
   /** Gets the name of a part file given its number **/
   protected def getPartFileName(partNum: Int): String = f"/part-${partNum}%05d"
 
+  /** Writes a done.txt in the output file to indicate a completed crawl, and persists crawl state **/
+  def complete(crawlState: CrawlState): Unit
+
   /** Writes items to intermediary file
- *
+    *
     * @return Returns the timestamp directory to which the intermediary files were written
     */
   protected def writeToIntermediary(items: Seq[String], partNum: Int, crawlState: CrawlState, outputDir: File)(implicit executionContext: ExecutionContext): File = {
@@ -81,6 +84,11 @@ case class LocalCrawlSink(outputDir: File) extends CrawlSink with StrictLogging 
     writeToIntermediary(items, partNum, crawlState, outputDir)
   }
 
+  def complete(crawlState: CrawlState): Unit = {
+    val tsDir = new File(outputDir, crawlState.timestamp.toString)
+    new File(tsDir, "done.txt").createNewFile()
+  }
+
 }
 
 object S3CrawlSink {
@@ -93,6 +101,8 @@ object S3CrawlSink {
 
 /** S3 sink to write out items to S3 */
 case class S3CrawlSink(outputDir: File, bucketName: String) extends CrawlSink with StrictLogging {
+
+  val s3Client = AmazonS3ClientBuilder.standard().withRegion(Regions.US_WEST_2).build()
 
   override def init(): Unit = {
     if (!outputDir.exists()) outputDir.mkdirs()
@@ -107,14 +117,12 @@ case class S3CrawlSink(outputDir: File, bucketName: String) extends CrawlSink wi
     /* Upload file to S3 and delete */
     val tsDir = writeToIntermediary(items, partNum, crawlState, outputDir)
     val fileToWrite = new File(tsDir, getPartFileName(partNum))
-    retry(S3CrawlSink.NUM_RETRIES)(uploadToS3(s"${crawlState.timestamp.toString}/${fileToWrite.getName}", fileToWrite))
+    retry(S3CrawlSink.NUM_RETRIES)(s3Client.putObject(bucketName, s"${crawlState.timestamp.toString}/${fileToWrite.getName}", fileToWrite))
     fileToWrite.delete()
   }
 
-  /** Write file to S3 **/
-  private def uploadToS3(key: String, file: File) = {
-    val s3Client = AmazonS3ClientBuilder.standard().withRegion(Regions.US_WEST_2).build()
-    s3Client.putObject(bucketName, key, file)
+  def complete(crawlState: CrawlState): Unit = {
+    s3Client.putObject(bucketName, s"${crawlState.timestamp.toString}/done.txt", new File("done.txt"))
   }
 
   /** Retries running a function some number of times **/
