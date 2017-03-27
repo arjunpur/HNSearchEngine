@@ -1,6 +1,6 @@
 package index
 
-import java.io.File
+import java.net.InetAddress
 import java.nio.file.Path
 
 import crawler.CrawlSink
@@ -10,33 +10,11 @@ import org.rogach.scallop.ScallopConf
   * Created by arjunpuri on 3/26/17.
   */
 
-trait Source {
-
-
-}
-
-object Source {
-
-  val DEFAULT_SOURCE = "index.LocalSource"
-
-  /** Using a type reference to the crawler sink, generate the appropriate sink */
-  def apply(inputDir: Path, sourceType: String): Source = {
-    val source = sourceType match {
-      case "index.S3CrawlSource" => LocalSource(inputDir)
-      case "index.LocalCrawlSource" =>
-      case _ => throw new IllegalArgumentException(s"$sourceType does not exist")
-    }
-  }
-}
-
-case class LocalSource(inputDir: Path) {
-
-}
-
-
 class BulkIndexerArgs(args: Seq[String]) extends ScallopConf(args) {
   val input = opt[Path](name = "input", default = Some(CrawlSink.DEFAULT_OUTPUT_DIR.toPath))
-  val sourceType = opt[String](name = "sourceType", default = Some(Source.DEFAULT_SOURCE))
+  val sourceType = opt[String](name = "sourceType", default = Some(IndexerSource.DEFAULT_SOURCE))
+  val hosts = opt[List[String]](name = "hosts", default = Some(List(InetAddress.getLocalHost.getHostName)))
+  val clusterName = opt[String](name = "clusterName", default = Some("hnsearch"))
   verify()
 }
 
@@ -48,10 +26,10 @@ object BulkIndexerJob {
 
   def main(args: Array[String]) = {
     val indexArgs = new BulkIndexerArgs(args)
-    val source = Source(indexArgs.input.apply(), indexArgs.sourceType.apply())
-
+    val source = IndexerSource(indexArgs.sourceType.apply())
+    val client = HNElasticCluster.getClient()
+    BulkIndexer(client).index(source.read(indexArgs.input.apply()))
   }
 
-
-
 }
+
