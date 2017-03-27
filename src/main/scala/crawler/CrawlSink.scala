@@ -6,8 +6,7 @@ import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import com.typesafe.scalalogging.StrictLogging
 
-import scala.concurrent.duration.Duration
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success, Try}
 
 /**
@@ -39,6 +38,7 @@ object CrawlSink {
   * Trait which any crawler sink will implement to write out items
   */
 sealed trait CrawlSink extends StrictLogging {
+
   def outputDir: File
   /** Any init code **/
   def init(): Unit = {}

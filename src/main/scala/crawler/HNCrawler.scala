@@ -3,8 +3,6 @@ package crawler
 import java.io.File
 
 import com.typesafe.scalalogging.StrictLogging
-import org.apache.commons.lang.time.DateUtils
-import org.scalactic.ErrorMessage
 import spray.json._
 import client.{HNItem, HNClient, HNJsonProtocol}
 
@@ -87,7 +85,7 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
       partNum += 1
     }
     sink.complete(crawlState)
-    logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime} ms")
+    logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime} ms. Outputted to ${new File(sink.outputDir, crawlState.timestamp.toString)}")
     client.shutdown()
   }
 
