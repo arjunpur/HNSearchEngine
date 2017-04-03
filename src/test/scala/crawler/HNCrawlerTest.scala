@@ -1,4 +1,4 @@
-package job
+package crawler
 
 import java.io.File
 
@@ -18,8 +18,8 @@ class HNCrawlerTest extends FunSuite{
     val outputDir = new File("/Users/arjunpuri/tmp/crawler")
     val crawler = new HNCrawler(outputDir, None, new HNClient(), batchSize = 1)
     val items = Seq(
-      Future(HNItem(id = 1, text = Some("Item 1"))),
-      Future(HNItem(id = 2, text = Some("Item 2")))
+      Future(HNItem(id = Some(1), text = Some("Item 1"))),
+      Future(HNItem(id = Some(2), text = Some("Item 2")))
       )
     crawler.writeItems(items, 1)
     val text = new File(outputDir, "part-1.txt")
