@@ -14,7 +14,7 @@ import scala.util.Try
   * Created by arjunpuri on 3/26/17.
   */
 
-trait IndexerSource {
+trait IndexerSource extends StrictLogging {
 
   /** Streams crawled output for the consumer to process **/
   def read(input: Path): Iterator[HNItem]
@@ -37,7 +37,7 @@ object IndexerSource {
 
 }
 
-case class LocalSource() extends IndexerSource with StrictLogging {
+case class LocalSource() extends IndexerSource {
 
   override def read(input: Path): Iterator[HNItem] = {
     logger.info(s"Reading files from ${input.toUri}")
