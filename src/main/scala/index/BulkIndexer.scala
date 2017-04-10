@@ -8,11 +8,14 @@ import org.elasticsearch.transport.client.PreBuiltTransportClient
   */
 
 /** API to index files into the ElasticSearch cluster **/
-case class BulkIndexer(client: PreBuiltTransportClient) {
+case class BulkIndexer(client: HNElasticCluster) {
+
+  def init(): Unit = {
+    client.createIndex(HNElasticCluster.ITEMS_INDEX)
+  }
 
   def index(itemIterator: Iterator[HNItem]): Unit = {
-    itemIterator.take(100).foreach(println)
-
+    client.upsert(itemIterator)
 
   }
 
