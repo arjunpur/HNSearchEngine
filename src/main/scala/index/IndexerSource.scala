@@ -27,12 +27,11 @@ object IndexerSource {
 
   /** Using a type reference to the crawler sink, generate the appropriate sink */
   def apply(sourceType: String): IndexerSource = {
-    val source = sourceType match {
+    sourceType match {
       case "index.S3Source" => S3Source()
       case "index.LocalSource" => LocalSource()
       case _ => throw new IllegalArgumentException(s"$sourceType does not exist")
     }
-    source
   }
 
 }
@@ -40,7 +39,7 @@ object IndexerSource {
 case class LocalSource() extends IndexerSource {
 
   override def read(input: Path): Iterator[HNItem] = {
-    logger.info(s"Reading files from ${input.toUri}")
+    logger.info(s"Reading files from ${input.toFile.getName}")
     val subFiles = input.toFile.listFiles()
     val isTsDir = subFiles.map(_.getName).contains("done.txt")
     /* If pointing to a timestamp directory, get an iterator of all files.
