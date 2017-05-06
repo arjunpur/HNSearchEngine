@@ -37,7 +37,8 @@ object HNElasticCluster {
 class HNElasticCluster(client: TransportClient) extends StrictLogging {
 
   import HNJsonProtocol._
-
+  
+  /* Client to interact with indices */
   private val indicesClient: IndicesAdminClient = client.admin().indices()
 
   def createIndex(name: String): Unit = {
@@ -59,6 +60,7 @@ class HNElasticCluster(client: TransportClient) extends StrictLogging {
       val itemType = item.`type`.get
       val id = item.id.get.toString
       val json = item.toJson.toString
+      /* Create requests to submit to cluster */
       val indexRequest = new IndexRequest(HNElasticCluster.ITEMS_INDEX, itemType, id).source(json)
       val updateRequest = new UpdateRequest(HNElasticCluster.ITEMS_INDEX, itemType, id).doc(json).upsert(indexRequest)
       val res = client.update(updateRequest).get()

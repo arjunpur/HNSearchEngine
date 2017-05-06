@@ -18,7 +18,6 @@ import scala.util.{Try, Failure, Success}
   * Created by arjunpuri on 11/29/16.
   */
 
-
 /**
   * Arguments for the crawler
   */
@@ -44,9 +43,7 @@ object HNCrawler {
   }
 
 }
-
-case class CrawlState(timestamp: Long)
-
+  
 /**
   * @param maxId maximum id to crawl
   * @param client client to communicate with the HN api
@@ -63,39 +60,46 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
 
   /** Runs the crawl **/
   def runJob(): Unit = {
-    val crawlState = CrawlState(System.currentTimeMillis())
-    val maxItemId = Await.result(client.maxItemId(), Duration.Inf).toLong // Find max available item id
-    var i = maxId.getOrElse(maxItemId)
-    var partNum = 0
-    logger.info(s"Found max Id as: $i")
-    val currentTime = System.currentTimeMillis()
+
+    val maxItemId: Long = Await.result(client.maxItemId(), Duration.Inf).toLong // Find max available item id
+    var id: Long = maxId.getOrElse(maxItemId)
+    var partNum: Int = 0
+    logger.info(s"Found max Id as: $id")
+
+    val currentTime: Long = System.currentTimeMillis()
+    var crawlState: CrawlState = sink.getCrawlState().copy(timestamp = currentTime)
+
     /* Batch the ids and asynchronously crawl them */
-    while (i > 0) {
-      val lowerId = Math.max(0, i - batchSize)
-      val idsToProcess = i to lowerId by -1
+    while (id > 0) {
+      val lowerId: Long = Math.max(0, id - batchSize)
+      val idsToProcess: Seq[Long] = id to lowerId by -1
 
       logger.info(s"Processing Ids: ${idsToProcess.min} to ${idsToProcess.max}")
-      val (items, failures) = crawlItems(idsToProcess)
+      val (items, failures): (Seq[HNItem], Seq[String]) = crawlItems(idsToProcess)
       logger.info(s"Got back ${items.size} success items")
       logger.info(s"Got back ${failures.size} failed items: $failures")
 
-      val serializedItems = items.map(_.toJson.toString) // api call foreach id, then serialize
+      val serializedItems: Seq[String] = items.map(_.toJson.toString) // api call foreach id, then serialize
       sink.writeItems(serializedItems, partNum, crawlState)
-      i = lowerId
+      id = lowerId
+      crawlState = crawlState.copy(lastCrawledId = id)
+      sink.persistCrawlState(crawlState)
       partNum += 1
     }
+
     sink.complete(crawlState)
     logger.info(s"Crawl duration: ${System.currentTimeMillis() - currentTime} ms. Outputted to ${new File(sink.outputDir, crawlState.timestamp.toString)}")
+
     client.shutdown()
   }
 
-  /** Crawls a series of ids an syncrhonously writes to sink */
+  /** Crawls a series of ids and syncrhonously writes to sink */
   def crawlItems(idsToCrawl: Seq[Long]): (Seq[HNItem], Seq[String]) = {
-    val crawledFutures = idsToCrawl.map(client.item)
-    val triedItems = crawledFutures.map(futureToFutureTry)
-    val results = Await.result(Future.sequence(triedItems), Duration.Inf).zip(idsToCrawl)
-    val successItems = results.map(_._1).flatMap(_.toOption)
-    val failedItems = results.collect {
+    val crawledFutures: Seq[Future[HNItem]] = idsToCrawl.map(client.item)
+    val triedItems: Seq[Future[Try[HNItem]]] = crawledFutures.map(futureToFutureTry)
+    val results: Seq[(Try[HNItem], Long)] = Await.result(Future.sequence(triedItems), Duration.Inf).zip(idsToCrawl)
+    val successItems: Seq[HNItem] = results.map(_._1).flatMap(_.toOption)
+    val failedItems: Seq[String] = results.collect {
       case (Failure(e), idx) => s"Item #$idx failed with: ${e.getLocalizedMessage}"
     }
     (successItems, failedItems)
@@ -103,7 +107,7 @@ class HNCrawler(maxId: Option[Long] = None, client: HNClient, batchSize: Int = 1
 
   /** Converts a future to a try future */
   private def futureToFutureTry[T](f: Future[T]): Future[Try[T]] = {
-    f.map(Success(_)) .recover({case x => Failure(x)})
+    f.map(Success(_)).recover { case x => Failure(x) }
   }
 
 }
