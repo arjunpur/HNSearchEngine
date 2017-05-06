@@ -13,10 +13,13 @@ libraryDependencies ++= Seq(
   "io.spray" % "spray-client_2.11" % "1.3.3",
   "io.spray" % "spray-json_2.11" % "1.3.2",
   "org.rogach" %% "scallop" % "2.0.6",
-  "org.slf4j" % "slf4j-log4j12" % "1.2",
+  "org.slf4j" % "slf4j-simple" % "1.7.25",
+  "org.apache.logging.log4j" % "log4j-api" % "2.7",
+  "org.apache.logging.log4j" % "log4j-core" % "2.7",
   "com.typesafe.scala-logging" %% "scala-logging" % "3.5.0",
   "com.amazonaws" % "aws-java-sdk" % "1.11.86",
-  "org.elasticsearch" % "elasticsearch" % "0.20.5"
+  "org.elasticsearch.client" % "transport" % "5.2.2"
 )
 
 scalacOptions := Seq("-feature", "-language:implicitConversions")
+
